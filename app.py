@@ -4,7 +4,7 @@ from flask import Flask, render_template, request, flash, redirect, session, g
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
-from forms import UserAddForm, LoginForm, MessageForm
+from forms import UserAddForm, LoginForm, MessageForm, UserEditProfileForm
 from models import db, connect_db, User, Message
 
 CURR_USER_KEY = "curr_user"
@@ -18,7 +18,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ECHO'] = False
-app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = True
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', "it's a secret")
 toolbar = DebugToolbarExtension(app)
 
@@ -113,6 +113,10 @@ def login():
 @app.route('/logout')
 def logout():
     """Handle logout of user."""
+
+    do_logout()
+    flash("Goodbye!", "info")
+    return redirect('/')
 
     # IMPLEMENT THIS
 
@@ -209,8 +213,37 @@ def stop_following(follow_id):
 
 
 @app.route('/users/profile', methods=["GET", "POST"])
-def profile():
+def update_profile():
     """Update profile for current user."""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    user = g.user
+
+    form = UserEditProfileForm(obj=user)
+
+    if form.validate_on_submit():
+        user.username = form.username.data
+        user.email = form.email.data
+        user.bio = form.bio.data
+        user.image_url = form.image_url.data
+        user.header_image_url = form.header_image_url.data
+
+        correctPassword = User.authenticate(user.username, form.password.data)
+
+        if correctPassword:
+            db.session.commit()
+            return redirect(f"/users/{user.id}")
+        else:
+            flash("Wrong password, please try again.", 'danger')
+    
+    return render_template('users/edit.html', form=form, user_id=user.id)
+
+
+        
+
+
 
     # IMPLEMENT THIS
 
@@ -293,8 +326,12 @@ def homepage():
     """
 
     if g.user:
+        
+        following_ids = [f.id for f in g.user.following] +[g.user.id]
+
         messages = (Message
                     .query
+                    .filter(Message.user_id.in_(following_ids))
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
