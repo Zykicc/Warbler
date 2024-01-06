@@ -5,7 +5,7 @@ from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
 from forms import UserAddForm, LoginForm, MessageForm, UserEditProfileForm
-from models import db, connect_db, User, Message
+from models import db, connect_db, User, Message, Likes
 
 CURR_USER_KEY = "curr_user"
 
@@ -149,13 +149,14 @@ def users_show(user_id):
 
     # snagging messages in order from the database;
     # user.messages won't be in order by default
+    likes = [message.id for message in user.likes]
     messages = (Message
                 .query
                 .filter(Message.user_id == user_id)
                 .order_by(Message.timestamp.desc())
                 .limit(100)
                 .all())
-    return render_template('users/show.html', user=user, messages=messages)
+    return render_template('users/show.html', user=user, messages=messages, likes=likes)
 
 
 @app.route('/users/<int:user_id>/following')
@@ -239,13 +240,47 @@ def update_profile():
             flash("Wrong password, please try again.", 'danger')
     
     return render_template('users/edit.html', form=form, user_id=user.id)
-
-
-        
-
-
-
     # IMPLEMENT THIS
+
+@app.route('/users/<int:user_id>/likes', methods=["GET", "POST"])
+def show_likes(user_id):
+    """show user likes messages"""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    
+    user = User.query.get_or_404(user_id)
+
+
+    return render_template('users/likes.html', user=user, likes=user.likes)
+
+@app.route('/messages/<int:message_id>/like', methods=['POST', 'GET'])
+def add_like(message_id):
+    """make a button for liking and unliking messages"""
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    
+    like = Likes.query.filter_by(user_id=g.user.id, message_id=message_id).first()
+    liked_msg = Message.query.get_or_404(message_id)
+
+    if not liked_msg:
+        flash('Message does not exist.', category='error')
+    elif like:
+        db.session.delete(like)
+        db.session.commit()
+    else:
+        like = Likes(user_id=g.user.id, message_id=message_id)
+        db.session.add(like)
+        db.session.commit()
+
+    return redirect("/")
+    
+
+    
+
+
 
 
 @app.route('/users/delete', methods=["POST"])
@@ -326,8 +361,14 @@ def homepage():
     """
 
     if g.user:
+
         
+        
+
         following_ids = [f.id for f in g.user.following] +[g.user.id]
+
+        
+        liked_msg_ids = [msg.id for msg in g.user.likes]
 
         messages = (Message
                     .query
@@ -336,7 +377,12 @@ def homepage():
                     .limit(100)
                     .all())
 
-        return render_template('home.html', messages=messages)
+        for msg in messages:
+            msg_likes = (Likes.query.filter(Likes.message_id == msg.id).all())
+            msg.total_likes = len(msg_likes)
+    
+
+        return render_template('home.html', messages=messages, likes=liked_msg_ids)
 
     else:
         return render_template('home-anon.html')
